@@ -1,0 +1,139 @@
+/*
+ * GccApplication1.c
+ *
+ * Created: 2022-11-29 오후 5:12:40
+ * Author : USER
+ */ 
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+#include <stdio.h>
+
+#define  TRIG           7
+#define  ECHO           6
+#define  SOUND_VELOCITY 340UL
+#define  OUT            0xff
+#define  IN             0x00
+
+unsigned char timer0_CNT=0x100-250; // 타이머 인터럽트 0번 0.2ms설정
+unsigned int  distance=0; // 거리 측정값을 저장할 변수 설정
+int cnt=0, cnt1=0, cnt2=0, num=0;
+int fnd[10]={0xc0, 0xf9, 0xa4, 0xb0, 0x99, 0x92, 0x82, 0xf8, 0x80, 0x90};
+int a1=0, a10=0, a100=0, a1000=0;
+unsigned int TCNT_0=256-250;
+
+
+ISR(TIMER0_OVF_vect)
+{
+	cnt++;
+	cnt2++;
+	a100=(num/1000);
+	a10=(num/100)%10;
+	a1=(num/10)%10;
+	if(cnt==5)
+	{
+		PORTD=0b01111111;
+		PORTC=fnd[a1];
+	}
+	else if (cnt==10)
+	{
+		PORTD=0b10111111;
+		PORTC=fnd[a10];
+	}
+	else if (cnt==15)
+	{
+		PORTD=0b11011111;
+		PORTC=fnd[a100];
+		cnt=0;
+	}
+	if(cnt2>300) 
+	{
+		num=distance;
+		cnt2=0;
+	}
+	TCNT0=TCNT_0;
+}
+
+void Tx_Ch(unsigned char data)
+{
+	// UDRE=1 체크
+	while(!(UCSR1A & 0b00100000));
+	UDR1=data;
+}
+
+void tx_str(unsigned char *str)
+{
+	while(*str){
+		Tx_Ch(*str++);
+	}
+}
+
+char Rx_Ch(void){
+	//RXC=1 확인 (수신 완료 신호)
+	while(!(UCSR1A & 0x80)); // 수신완료 신호가 1이 될 때까지 while문 안에서 대기
+	return UDR1;
+}
+
+
+int main(void)
+{
+	//송수신
+	FILE* fpStdio = fdevopen(Tx_Ch, Rx_Ch); // printf, scanf 쓰기 위해 선언
+	UCSR1A=0x00;
+	UCSR1B=0b00011000;
+	UCSR1C=0b00000110;
+	UBRR1L=103;
+	//입출력
+	DDRA=OUT;
+	DDRB=((DDRB|(1<<TRIG))&~(1<<ECHO));
+	DDRC=OUT;
+	DDRD=0xf0;
+	DDRE=OUT;
+	DDRF=OUT;
+	//타이머, 외부 인터럽트
+	sei();
+	TIMSK=0b00000001; // 타이머 0번 인터럽트(오버플로)
+	TCCR0=0b00000100;// 64분주
+	TCNT0=TCNT_0;
+    while (1) 
+    {
+		TCCR1B=0x03;
+		PORTB&= ~(1<<TRIG);
+		_delay_us(10);
+		PORTB|=(1<<TRIG);
+		_delay_us(10);
+		PORTB&= ~(1<<TRIG);
+		while(!(PINB & (1<<ECHO)));
+		TCNT1=0x0000;
+		while(PINB & (1<<ECHO));
+		TCCR1B=0x00;
+		distance = (unsigned int)(SOUND_VELOCITY * (TCNT1*4/2)/1000);
+		if(a10<=1 && num<1000)
+		{
+			PORTA=0xff;
+			PORTF=0x00;
+		}
+		else if(a10==2 && num<1000)
+		{
+			PORTA=0b11111110;
+			PORTF=0x01;
+		}
+		else if(a10==3 && num<1000)
+		{
+			PORTA=0b11111100;
+			PORTF=0b00000011;
+		}
+		else if(a10==4 && num<1000){
+			PORTA=0b11111000;
+			PORTF=0b00000111;
+		}
+		else if(a10>=5 || num>1000){
+			PORTA=0b11110000;
+			PORTF=0b00001111;
+		}
+	}
+}
+
+
+
